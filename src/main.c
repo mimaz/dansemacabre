@@ -48,22 +48,19 @@ static void make_rgb(struct led_rgb *rgb, int r, int g, int b)
 	rgb->b = b;
 }
 
-void main(void)
+static struct k_timer loop_timer;
+static struct k_thread loop_thread;
+
+static void loop_handler(struct k_timer *tim)
 {
-	int counter, i, offset;
-	time_t nexttime;
+	k_thread_resume(&loop_thread);
+}
 
-	strip_driver = device_get_binding(DT_INST_0_WORLDSEMI_WS2812_LABEL);
+static void loop_entry(void *p1, void *p2, void *p3)
+{
+	int offset, counter, i;
+
 	counter = 0;
-
-	make_rgb(&colors[BLACK], 0, 0, 0);
-	make_rgb(&colors[RED], 255, 0, 0);
-	make_rgb(&colors[GREEN], 0, 255, 0);
-	make_rgb(&colors[BLUE], 0, 0, 255);
-	make_rgb(&colors[YELLOW], 240, 240, 0);
-	make_rgb(&colors[PURPLE], 240, 0, 240);
-	make_rgb(&colors[CYAN], 240, 0, 240);
-	make_rgb(&colors[WHITE], 225, 225, 225);
 
 	while (1) {
 		/* reset all colors */
@@ -78,6 +75,30 @@ void main(void)
 		/* increment the counter and strip then wait 200ms */
 		counter++;
 		update_strip();
-		k_sleep(K_MSEC(200));
+		k_thread_suspend(&loop_thread);
 	}
+}
+
+K_THREAD_STACK_DEFINE(loop_stack, 500);
+
+void main(void)
+{
+	strip_driver = device_get_binding(DT_INST_0_WORLDSEMI_WS2812_LABEL);
+
+	make_rgb(&colors[BLACK], 0, 0, 0);
+	make_rgb(&colors[RED], 255, 0, 0);
+	make_rgb(&colors[GREEN], 0, 255, 0);
+	make_rgb(&colors[BLUE], 0, 0, 255);
+	make_rgb(&colors[YELLOW], 240, 240, 0);
+	make_rgb(&colors[PURPLE], 240, 0, 240);
+	make_rgb(&colors[CYAN], 240, 0, 240);
+	make_rgb(&colors[WHITE], 225, 225, 225);
+
+	k_thread_create(&loop_thread, 
+			loop_stack, K_THREAD_STACK_SIZEOF(loop_stack),
+			loop_entry, NULL, NULL, NULL,
+			1, 0, K_NO_WAIT);
+
+	k_timer_init(&loop_timer, loop_handler, NULL);
+	k_timer_start(&loop_timer, 100, 500);
 }

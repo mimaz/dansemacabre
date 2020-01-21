@@ -23,7 +23,8 @@ enum
 
 static struct device *strip_driver;
 static struct led_rgb strip_colors[LED_COUNT];
-static struct led_rgb colors[N_COLORS];
+static struct led_rgb fixed_colors[N_COLORS];
+static volatile bool strip_dirty;
 
 static void one_color(struct led_rgb *rgb, int begin, int end)
 {
@@ -38,7 +39,7 @@ static void one_color(struct led_rgb *rgb, int begin, int end)
 
 static void update_strip()
 {
-	led_strip_update_rgb(strip_driver, strip_colors, LED_COUNT);
+	strip_dirty = true;
 }
 
 static void make_rgb(struct led_rgb *rgb, int r, int g, int b)
@@ -48,57 +49,54 @@ static void make_rgb(struct led_rgb *rgb, int r, int g, int b)
 	rgb->b = b;
 }
 
-static struct k_timer loop_timer;
-static struct k_thread loop_thread;
-
-static void loop_handler(struct k_timer *tim)
+static void strip_update_thread_entry(void *p1, void *p2, void *p3)
 {
-	k_thread_resume(&loop_thread);
+	while (1) {
+		if (strip_dirty) {
+			led_strip_update_rgb(strip_driver,
+					     strip_colors, LED_COUNT);
+			strip_dirty = false;
+		}
+		k_sleep(K_MSEC(25));
+	}
 }
 
-static void loop_entry(void *p1, void *p2, void *p3)
+K_THREAD_DEFINE(strip_update_thread, 1024,
+		strip_update_thread_entry,
+		NULL, NULL, NULL,
+		1, 0, K_NO_WAIT);
+
+void main(void)
 {
 	int offset, counter, i;
+
+	strip_driver = device_get_binding(DT_INST_0_WORLDSEMI_WS2812_LABEL);
+
+	make_rgb(&fixed_colors[BLACK], 0, 0, 0);
+	make_rgb(&fixed_colors[RED], 255, 0, 0);
+	make_rgb(&fixed_colors[GREEN], 0, 255, 0);
+	make_rgb(&fixed_colors[BLUE], 0, 0, 255);
+	make_rgb(&fixed_colors[YELLOW], 240, 240, 0);
+	make_rgb(&fixed_colors[PURPLE], 240, 0, 240);
+	make_rgb(&fixed_colors[CYAN], 0, 240, 240);
+	make_rgb(&fixed_colors[WHITE], 225, 225, 225);
 
 	counter = 0;
 
 	while (1) {
 		/* reset all colors */
-		one_color(&colors[BLACK], -1, -1);
+		one_color(&fixed_colors[BLACK], -1, -1);
 
 		/* draw moving rainbow */
 		for (i = 0; i < N_COLORS; i++) {
 			offset = (counter + i) % LED_COUNT;
-			one_color(&colors[i], offset, offset + 1);
+			one_color(&fixed_colors[i], offset, offset + 1);
 		}
+
+		update_strip();
 
 		/* increment the counter and strip then wait 200ms */
 		counter++;
-		update_strip();
-		k_thread_suspend(&loop_thread);
+		k_sleep(K_MSEC(250));
 	}
-}
-
-K_THREAD_STACK_DEFINE(loop_stack, 500);
-
-void main(void)
-{
-	strip_driver = device_get_binding(DT_INST_0_WORLDSEMI_WS2812_LABEL);
-
-	make_rgb(&colors[BLACK], 0, 0, 0);
-	make_rgb(&colors[RED], 255, 0, 0);
-	make_rgb(&colors[GREEN], 0, 255, 0);
-	make_rgb(&colors[BLUE], 0, 0, 255);
-	make_rgb(&colors[YELLOW], 240, 240, 0);
-	make_rgb(&colors[PURPLE], 240, 0, 240);
-	make_rgb(&colors[CYAN], 240, 0, 240);
-	make_rgb(&colors[WHITE], 225, 225, 225);
-
-	k_thread_create(&loop_thread, 
-			loop_stack, K_THREAD_STACK_SIZEOF(loop_stack),
-			loop_entry, NULL, NULL, NULL,
-			1, 0, K_NO_WAIT);
-
-	k_timer_init(&loop_timer, loop_handler, NULL);
-	k_timer_start(&loop_timer, 100, 500);
 }
